@@ -56,14 +56,14 @@ Do **not** point this at anything else — add to each model's `cmd`:
 models:
   my-model:
     cmd: llama-server --port ${PORT} --model /path/to/model.gguf \
-      --slot-save-path ~/.kv-cache/slots --sps 0.0 -np 4
+      --slot-save-path ~/.kv-cache/slots -sps 0.0 -np 4
 ```
 
 | Flag | Why |
 |---|---|
 | `--slot-save-path ~/.kv-cache/slots` | **Required.** Staging dir where llama.cpp writes slot blobs; kv-proxy moves them into the per-session layout. Must match `slot_save_path` in kv-proxy's config. |
 | `-np 4` | Slot count. ≥ your expected *concurrent* generations. More sessions than slots is fine — that's what save/restore is for; simultaneous generations beyond `-np` queue. |
-| `--sps 0.0` | Disables llama.cpp's prompt-similarity slot picker so it doesn't fight the proxy's explicit `id_slot` routing. |
+| `-sps 0.0` | Disables llama.cpp's prompt-similarity slot picker so it doesn't fight the proxy's explicit `id_slot` routing. |
 
 Restart llama-swap after editing.
 
@@ -175,7 +175,7 @@ including SSE streaming.
 ## Known limitations
 
 - `id_slot` must be honored by your llama.cpp build for deterministic routing
-  (current master does; with `--sps 0.0` it's the only routing mechanism).
+  (current master does; with `-sps 0.0` it's the only routing mechanism).
 - Slot count `-np` bounds *concurrent* generations, not total sessions.
 - If a model is unloaded mid-generation by llama-swap, in-flight requests may
   fail once; the next request re-restores cleanly.
