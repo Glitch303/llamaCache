@@ -1,0 +1,43 @@
+# kv-proxy configuration.
+# Copy to config.toml (or point KV_PROXY_CONFIG at your own file) and edit.
+# Environment variables override: KV_PROXY_CONFIG, KV_PROXY_LISTEN,
+# KV_PROXY_LLAMA_SWAP_URL, KV_PROXY_CACHE_DIR, KV_PROXY_MAX_CACHE_SIZE.
+
+listen = "0.0.0.0:8081"
+
+# The only upstream kv-proxy knows. llama-swap must be reachable here.
+llama_swap_url = "http://127.0.0.1:8080"
+
+# Where per-session KV blobs live: <cache_dir>/<frontend>/<session>/<model>/state.bin
+cache_dir = "~/.kv-cache"
+
+# MUST match the --slot-save-path you add to each llama-server cmd in
+# llama-swap's config.yaml. This is just a staging dir — llama.cpp writes
+# slot files there and kv-proxy moves them into cache_dir per session.
+slot_save_path = "~/.kv-cache/slots"
+
+# Global cap across all frontends/sessions/models. LRU-evicts oldest beyond this.
+max_cache_size = "20GB"
+
+# Seconds to queue a request when every slot is busy with an active generation.
+# 0 = fail fast with 503.
+wait_for_slot_timeout = 120
+
+# How often (seconds) to poll llama-swap's /running endpoint to detect manual
+# model loads/unloads. 0 disables the watcher (per-request model switching still works).
+model_poll_interval = 2.0
+
+# Save KV after every successful request (background, best-effort).
+save_after_request = true
+
+# Optional: if your llama-swap build does not expose /upstream/{model}, kv-proxy
+# can talk to the real llama-server directly for slot ops instead. Map model id -> host:port.
+[direct_upstream]
+# my-model = "127.0.0.1:9931"
+
+# Per-frontend API keys. Requests with Authorization: Bearer <key> are attributed
+# to that frontend. Unknown or missing keys fall back to the "default" frontend.
+[keys]
+sillytavern = "sk-st-change-me"
+hermes = "sk-hermes-change-me"
+openwebui = "sk-owu-change-me"
