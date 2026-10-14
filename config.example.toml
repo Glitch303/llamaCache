@@ -30,8 +30,12 @@ model_poll_interval = 2.0
 # Save KV after every successful request (background, best-effort).
 save_after_request = true
 
-# Optional: if your llama-swap build does not expose /upstream/{model}, kv-proxy
-# can talk to the real llama-server directly for slot ops instead. Map model id -> host:port.
+# Optional: point straight at a plain llama-server instead of llama-swap
+# (single always-loaded model; no hot-swapping or /running watcher).
+direct_llama_server = false
+
+# Optional escape hatch: per-model direct host:port for slot ops, if your
+# llama-swap build does not expose /upstream/{model}.
 [direct_upstream]
 # my-model = "127.0.0.1:9931"
 

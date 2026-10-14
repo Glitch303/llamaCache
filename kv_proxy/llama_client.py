@@ -26,9 +26,13 @@ class LlamaError(Exception):
 
 class LlamaClient:
     def __init__(self, swap_url: str, direct_upstream: dict[str, str] | None = None,
-                 timeout: float = 30.0):
+                 timeout: float = 30.0, direct_llama_server: bool = False):
         self.swap_url = swap_url.rstrip("/")
         self.direct_upstream = {k: v.rstrip("/") for k, v in (direct_upstream or {}).items()}
+        # direct_llama_server: upstream is a plain llama-server, not llama-swap.
+        # Slot ops then hit /slots directly; chat requests still use the body's
+        # model field (llama-server accepts and ignores it).
+        self.direct_llama_server = direct_llama_server
         self._client = httpx.AsyncClient(
             base_url=self.swap_url,
             timeout=httpx.Timeout(timeout, read=3600.0),  # long reads: generations
@@ -40,22 +44,26 @@ class LlamaClient:
 
     # ------------------------------------------------------------- slot ops
 
-    def _slot_base(self, model: str) -> str:
-        """Base URL for /slots operations on the server running `model`."""
-        direct = self.direct_upstream.get(model)
-        if direct:
-            return f"{direct}/slots"
-        return f"{self.swap_url}/upstream/{model}/slots"
+    def _slot_path(self, model: str, sub: str = "") -> str:
+        """Path (relative to base_url) for /slots operations.
+
+        llama-swap mode:  /upstream/{model}/slots[/sub]
+        direct mode:      /slots[/sub]
+        per-model override via [direct_upstream]: absolute host:port + /slots
+        """
+        if self.direct_llama_server:
+            return f"/slots{('/' + sub) if sub else ''}"
+        return f"/upstream/{model}/slots{('/' + sub) if sub else ''}"
 
     async def get_slots(self, model: str) -> list[dict]:
-        r = await self._client.get(f"/upstream/{model}/slots")
+        r = await self._client.get(self._slot_path(model))
         if r.status_code != 200:
             raise LlamaError(r.status_code, r.text[:300])
         return r.json()
 
     async def save_slot(self, model: str, slot_id: int, filename: str) -> dict:
         r = await self._client.post(
-            f"/upstream/{model}/slots/{slot_id}",
+            self._slot_path(model, f"{slot_id}"),
             params={"action": "save"},
             json={"filename": filename},
         )
@@ -65,7 +73,7 @@ class LlamaClient:
 
     async def restore_slot(self, model: str, slot_id: int, filename: str) -> dict:
         r = await self._client.post(
-            f"/upstream/{model}/slots/{slot_id}",
+            self._slot_path(model, f"{slot_id}"),
             params={"action": "restore"},
             json={"filename": filename},
         )
@@ -75,7 +83,7 @@ class LlamaClient:
 
     async def erase_slot(self, model: str, slot_id: int) -> dict:
         r = await self._client.post(
-            f"/upstream/{model}/slots/{slot_id}",
+            self._slot_path(model, f"{slot_id}"),
             params={"action": "erase"},
         )
         if r.status_code != 200:
@@ -85,7 +93,18 @@ class LlamaClient:
     # ------------------------------------------------------------- discovery
 
     async def running_models(self) -> list[str]:
-        """Model ids currently loaded in llama-swap (GET /running)."""
+        """Model ids currently loaded.
+
+        llama-swap: GET /running. Direct llama-server: the single model it serves
+        (read from /v1/models).
+        """
+        if self.direct_llama_server:
+            try:
+                data = await self.get_models()
+                ids = [m.get("id") for m in data.get("data", []) if isinstance(m, dict)]
+                return [str(i) for i in ids if i]
+            except (httpx.HTTPError, ValueError):
+                return []
         try:
             r = await self._client.get("/running")
             if r.status_code != 200:

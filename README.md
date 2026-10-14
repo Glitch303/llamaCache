@@ -67,6 +67,20 @@ models:
 
 Restart llama-swap after editing.
 
+**Not using llama-swap?** kv-proxy can point directly at a plain `llama-server`
+instead. Set `llama_swap_url` to the server's address:
+
+```toml
+llama_swap_url = "http://127.0.0.1:8081"   # your llama-server, any port
+```
+
+Everything else works identically — slot save/restore go straight to the
+server's `/slots` endpoint (no `/upstream/{model}` prefix needed), and the
+`--slot-save-path` / `-sps 0.0` flags above still apply to how you launch
+llama-server. The only things you lose are llama-swap features: model hot-swapping
+and the `/running` swap watcher (with a single always-loaded model there's
+nothing to watch).
+
 ### 2. Install and configure kv-proxy
 
 ```sh
@@ -88,6 +102,36 @@ Or with uv: `uv pip install -e .` then `kv-proxy`.
 - **Session id**: frontends that let you set a custom header can send
   `X-KV-Session: <id>`; otherwise the OpenAI `user` field is used; otherwise
   everything shares one session per frontend (one cache each).
+
+#### Adding keys for more frontends
+
+Each entry in `[keys]` maps **frontend name → API key**. The name becomes the
+directory under `~/.kv-cache/`, and the key is what that frontend puts in its
+"llama.cpp / OpenAI API key" setting. Add as many as you have frontends — just
+append a line:
+
+```toml
+[keys]
+sillytavern = "sk-st-change-me"
+hermes = "sk-hermes-change-me"
+openwebui = "sk-owu-change-me"
+
+# adding a fourth frontend? one more line is all it takes:
+koboldcpp = "sk-kobold-change-me"
+novelai   = "sk-nai-change-me"
+```
+
+Then in that new frontend's settings, set base URL to the proxy and API key to
+`sk-kobold-change-me`. Its sessions will be cached under
+`~/.kv-cache/koboldcpp/<session>/...` automatically — no other config changes.
+
+Rules of thumb:
+
+- **Keys must be unique** across frontends (the first match wins).
+- Names are filesystem-safe: letters, digits, `._-` (anything else gets
+  sanitized + hashed).
+- No key / unknown key → everything lands in the shared `default` frontend.
+- Edit `config.toml`, then **restart kv-proxy** (`kv-proxy --config config.toml`).
 
 Example curl:
 

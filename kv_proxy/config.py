@@ -45,6 +45,7 @@ class Config:
     wait_for_slot_timeout: float = 120.0
     model_poll_interval: float = 2.0
     save_after_request: bool = True
+    direct_llama_server: bool = False
     direct_upstream: dict[str, str] = field(default_factory=dict)
     keys: dict[str, str] = field(default_factory=dict)
 
@@ -122,6 +123,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.model_poll_interval = float(v)
     if v := data.get("save_after_request"):
         cfg.save_after_request = bool(v)
+    if v := data.get("direct_llama_server"):
+        cfg.direct_llama_server = bool(v)
 
     du = data.get("direct_upstream") or {}
     if isinstance(du, dict):

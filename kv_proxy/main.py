@@ -33,7 +33,10 @@ def build_app(config: Config | None = None):
             await proxy.slots.stop()
             await proxy.client.aclose()
 
-    client = LlamaClient(cfg.llama_swap_url, cfg.direct_upstream)
+    client = LlamaClient(
+        cfg.llama_swap_url, cfg.direct_upstream,
+        direct_llama_server=cfg.direct_llama_server,
+    )
     store = CacheStore(cfg.cache_dir, cfg.max_cache_size)
     slots = SlotManager(
         client, store,
