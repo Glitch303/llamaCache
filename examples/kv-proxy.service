@@ -1,0 +1,27 @@
+# kv-proxy — per-session KV cache manager in front of llama-swap.
+#
+# User-level systemd unit (no root needed). Copy to
+#   ~/.config/systemd/user/kv-proxy.service
+# then edit the paths below to match your checkout:
+#
+#   install -Dm644 examples/kv-proxy.service ~/.config/systemd/user/kv-proxy.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now kv-proxy.service
+#   loginctl enable-linger $USER     # start at boot / survive logout (once)
+
+[Unit]
+Description=kv-proxy (per-session KV cache manager for llama-swap)
+Documentation=https://github.com/Glitch303/llamaCache
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Directory containing config.toml and .venv (the repo checkout).
+WorkingDirectory=/home/USER/llamaCache
+ExecStart="/home/USER/llamaCache/.venv/bin/kv-proxy" --config "/home/USER/llamaCache/config.toml"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

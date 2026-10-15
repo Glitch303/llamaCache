@@ -142,6 +142,31 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model": "my-model", "messages": [{"role":"user","content":"hi"}], "stream": false}'
 ```
 
+### 4. Run as a systemd service (optional)
+
+To have kv-proxy start at boot and restart on crash, use a user-level systemd
+unit (no root needed). `examples/kv-proxy.service` is ready to go:
+
+```sh
+install -Dm644 examples/kv-proxy.service ~/.config/systemd/user/kv-proxy.service
+# edit the two absolute paths (WorkingDirectory, ExecStart) to your checkout
+systemctl --user daemon-reload
+systemctl --user enable --now kv-proxy.service
+loginctl enable-linger $USER   # start at boot / keep running after logout (once)
+```
+
+Day-to-day:
+
+```sh
+systemctl --user status kv-proxy
+journalctl --user -u kv-proxy -f    # live logs
+systemctl --user restart kv-proxy   # after editing config.toml
+```
+
+A system-level unit works the same way: drop it in `/etc/systemd/system/`, add
+`User=<you>`/`Group=<you>`, and use `WantedBy=multi-user.target` instead of
+`WantedBy=default.target`.
+
 ## Endpoints
 
 | Endpoint | Behavior |
