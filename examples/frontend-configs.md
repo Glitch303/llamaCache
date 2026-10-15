@@ -5,31 +5,42 @@ All frontends: point the llama.cpp / OpenAI-compatible endpoint at
 
 ## SillyTavern
 
-- **Connection**: Settings → Connections → add a "llama.cpp (OpenAI)" connection,
-  base URL `http://localhost:8080/v1`.
+- **Connection**: Settings → Connections → add a connection with the **Custom**
+  source, URL `http://localhost:8080/v1` (your proxy's /v1).
 - **API key**: set to the `sillytavern` key from kv-proxy's `[keys]`.
-- **Session id**: SillyTavern doesn't expose arbitrary custom headers on the
-  OpenAI connector by default. Two options:
-  - Leave it — all chats share one cached session per model (fine for single
-    user; each chat still reuses its own conversation via `cache_prompt`).
-  - Or use a reverse proxy in front that injects `X-KV-Session` from the
-    character/chat id.
+- **Session id**: leave the *Additional Parameters* fields (the button next to
+  the URL field on the Custom source) **empty**. kv-proxy then derives a stable
+  per-chat session id from the conversation's opening messages (system prompt
+  + first user turn), so every chat gets its own cache automatically — no
+  client configuration needed.
+- **Important**: ST has **no per-chat id macro** — `{{chat}}`, `{{chatid}}`,
+  `{{chatName}}` etc. do not exist (verified against the 1.19.0 macro list).
+  Unknown macros are sent **verbatim**, so `{"session": "{{chat}}"}` in the
+  additional body makes *every* chat send the same literal session id, and
+  kv-proxy's `body["session"]` takes priority over the content hash — all
+  chats end up sharing one cache and overwriting each other. If you do pin an
+  explicit id, use something that actually resolves per conversation, e.g.
+  per-character `{"session": "{{char}}"}` (all chats with one character share
+  one cache), or a per-chat global variable via `{{getvar::...}}`.
+  A reverse proxy injecting `X-KV-Session: <chat-id>` works too.
 
 ## Open WebUI
 
 - **Admin → Settings → Inference Base URL**: `http://localhost:8080/v1`.
 - **API key**: the `openwebui` key.
-- Open WebUI sends a `user` field in chat requests (the logged-in user), which
-  kv-proxy uses as the session id — so each Open WebUI user gets an isolated
-  cache automatically.
+- Per-chat isolation is automatic: kv-proxy derives the session id from the
+  conversation's opening messages, so each chat gets its own cache. (The
+  `user` field, if sent, is only a coarser fallback.)
 
 ## Hermes / generic OpenAI clients
 
 - Base URL: `http://localhost:8080/v1`
 - API key: the `hermes` key (or any configured key).
-- Session id: send `X-KV-Session: <your-session-id>` header if your client
-  allows custom headers; otherwise set `"user": "<session-id>"` in the request
-  body; otherwise it falls back to the shared `default` session.
+- Session id (first non-empty wins): `X-KV-Session` header → `body["session"]`
+  → `body["id"]` → `messages[*]["metadata"]` / `messages[*]["id"]` →
+  **automatic per-chat hash of the opening messages** → `body["user"]` →
+  shared `default` session. In practice the opening-message hash means every
+  chat gets its own cache with no configuration.
 
 ## curl smoke test
 

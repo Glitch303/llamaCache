@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .cache_store import CacheStore
-from .identity import Identity, model_of, resolve_identity
+from .identity import (
+    Identity,
+    dump_opening,
+    model_of,
+    resolve_identity,
+    seed_components,
+)
 from .llama_client import LlamaClient, LlamaError
 from .slot_manager import SlotManager
 
@@ -115,6 +122,14 @@ async def _handle_chat(request: Request, path: str):
 
     fe, sess = identity.frontend, identity.session
 
+    log.info("chat request %s/%s model=%s %s", fe, sess, model,
+             seed_components(body))
+    debug_opening = os.environ.get("KV_PROXY_DEBUG_OPENING")
+    if debug_opening:
+        try:
+            dump_opening(body, debug_opening)
+        except OSError:
+            pass
     try:
         alloc = await proxy.slots.allocate(model, fe, sess, must_restore=True)
     except LlamaError as exc:

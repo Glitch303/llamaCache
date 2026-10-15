@@ -81,8 +81,16 @@ async def test_second_request_restores(client_factory, fake):
         for s in fake.slots["m1"].values():
             s["kv"] = 0
 
+        # same chat, next turn: the opening message is unchanged, so the
+        # content-derived session is stable and the saved blob gets restored
         r2 = await client.post("/v1/chat/completions", json={
-            "model": "m1", "messages": [{"role": "user", "content": "hi again"}], "stream": False,
+            "model": "m1",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello!"},
+                {"role": "user", "content": "hi again"},
+            ],
+            "stream": False,
         })
         assert r2.status_code == 200
         # slot used for the 2nd request must have KV restored from disk

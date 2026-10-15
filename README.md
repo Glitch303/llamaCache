@@ -18,8 +18,10 @@ cares about KV caching.
 ## How it works
 
 1. **Identify** each request: `Authorization: Bearer <key>` → frontend name
-   (from config); session id from the `X-KV-Session` header, else the OpenAI
-   `user` field, else `default`. Model from the body's `model` field.
+   (from config); session id from the `X-KV-Session` header, else an explicit
+   body field (`session` / `id` / per-message `metadata`), else an automatic
+   per-chat hash of the conversation's opening messages, else the `user`
+   field, else `default`. Model from the body's `model` field.
 2. **Allocate a slot** on the model's llama-server (via llama-swap's
    `/upstream/{model}/slots` passthrough): reuse the session's own slot, else
    an idle slot, else save+evict another session's idle slot, else queue until
@@ -99,9 +101,12 @@ Or with uv: `uv pip install -e .` then `kv-proxy`.
   llama.cpp API key to its configured key (`sillytavern`, `hermes`, `openwebui`
   in `[keys]`). Requests without a recognized key are cached under the
   `default` frontend.
-- **Session id**: frontends that let you set a custom header can send
-  `X-KV-Session: <id>`; otherwise the OpenAI `user` field is used; otherwise
-  everything shares one session per frontend (one cache each).
+- **Session id** (first non-empty wins): `X-KV-Session` header → body
+  `session` / `id` field → per-message `metadata` → **automatic per-chat hash
+  of the conversation's opening messages** → `user` field → shared `default`.
+  The opening-message hash means every chat in any OpenAI-compatible frontend
+  gets its own cache with zero configuration; the header/body fields just let
+  you pin or rename the id.
 
 #### Adding keys for more frontends
 
