@@ -25,6 +25,7 @@ class FakeSwap:
         self.slots: dict[str, dict[int, dict]] = {}
         self.requests: list[dict] = []  # recorded forwarded chat requests
         self.chat_replies: dict[str, object] = {}  # model -> reply body
+        self.auth: list[tuple[str, str | None]] = []  # (path, Authorization) per request
 
     def load_model(self, model: str, n_slots: int = 2):
         if model not in self.running:
@@ -36,11 +37,15 @@ class FakeSwap:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         body = json.loads(request.content.decode() or "{}") if request.method == "POST" else {}
+        self.auth.append((path, request.headers.get("authorization")))
 
         if path == "/running":
+            # real llama-swap shape: {"running": [{"model": "...", ...}]}
             with self.running_lock:
                 snapshot = list(self.running)
-            return httpx.Response(200, json=snapshot)
+            return httpx.Response(200, json={
+                "running": [{"model": m, "state": "ready"} for m in snapshot],
+            })
 
         if path == "/health":
             return httpx.Response(200, text="ok")

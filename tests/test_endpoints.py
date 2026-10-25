@@ -13,7 +13,7 @@ from kv_proxy.cache_store import CacheStore
 from kv_proxy.slot_manager import SlotManager
 
 
-def build(tmp_path, fake, keys=None):
+def build(tmp_path, fake, keys=None, api_key=None):
     cfg = Config(
         llama_swap_url="http://swap",
         cache_dir=tmp_path / "cache",
@@ -23,7 +23,7 @@ def build(tmp_path, fake, keys=None):
         model_poll_interval=0.05,
         keys=keys or {},
     )
-    client = LlamaClient("http://swap")
+    client = LlamaClient("http://swap", api_key=api_key)
     import httpx as _h
 
     client._client = _h.AsyncClient(transport=_h.MockTransport(fake.handle), base_url="http://swap")
@@ -38,8 +38,8 @@ def build(tmp_path, fake, keys=None):
 
 @pytest.fixture
 def client_factory(tmp_path, fake):
-    def _make(keys=None):
-        app = build(tmp_path, fake, keys=keys)
+    def _make(keys=None, api_key=None):
+        app = build(tmp_path, fake, keys=keys, api_key=api_key)
         transport = ASGITransport(app=app)
         return httpx.AsyncClient(transport=transport, base_url="http://t")
 
@@ -149,6 +149,47 @@ async def test_streaming_sse(client_factory, fake):
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/event-stream")
         assert b"[DONE]" in r.content
+
+
+async def test_upstream_requests_carry_api_key(client_factory, fake):
+    fake.load_model("m1", n_slots=2)
+    client = client_factory(api_key="ls-up")
+    async with client:
+        m = await client.get("/v1/models")
+        assert m.status_code == 200
+
+        r = await client.post("/v1/chat/completions", json={
+            "model": "m1", "messages": [{"role": "user", "content": "hi"}], "stream": False,
+        })
+        assert r.status_code == 200
+
+        authed = {path: auth for path, auth in fake.auth}
+        assert authed["/v1/models"] == "Bearer ls-up"
+        # slot ops + the forwarded chat all carry the upstream key
+        assert all(a == "Bearer ls-up" for a in authed.values()), authed
+        assert any(p.startswith("/upstream/m1/slots") for p in authed)
+        assert "/v1/chat/completions" in authed
+
+
+async def test_attribution_key_not_forwarded_upstream(client_factory, fake):
+    fake.load_model("m1", n_slots=2)
+    client = client_factory(keys={"cptr": "cptrconnection"}, api_key="ls-up")
+    async with client:
+        r = await client.post(
+            "/v1/chat/completions",
+            json={"model": "m1", "messages": [{"role": "user", "content": "x"}], "stream": False},
+            headers={"Authorization": "Bearer cptrconnection"},
+        )
+        assert r.status_code == 200
+        await _drain(client)
+
+        # attributed to the cptr frontend...
+        assert any(e.frontend == "cptr" for e in _store_of(client).list())
+        # ...but upstream saw the llama-swap key, not the attribution key
+        for path, auth in fake.auth:
+            assert auth != "Bearer cptrconnection", path
+            if auth is not None:
+                assert auth == "Bearer ls-up", (path, auth)
 
 
 async def test_models_and_health_passthrough(client_factory, fake):

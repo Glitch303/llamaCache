@@ -1,12 +1,26 @@
 # kv-proxy configuration.
 # Copy to config.toml (or point KV_PROXY_CONFIG at your own file) and edit.
 # Environment variables override: KV_PROXY_CONFIG, KV_PROXY_LISTEN,
-# KV_PROXY_LLAMA_SWAP_URL, KV_PROXY_CACHE_DIR, KV_PROXY_MAX_CACHE_SIZE.
+# KV_PROXY_LLAMA_SWAP_URL, KV_PROXY_CACHE_DIR, KV_PROXY_MAX_CACHE_SIZE,
+# KV_PROXY_LLAMA_SWAP_API_KEY, KV_PROXY_LLAMA_SWAP_CONFIG.
 
 listen = "0.0.0.0:8081"
 
-# The only upstream kv-proxy knows. llama-swap must be reachable here.
+# The only upstream kv-proxy knows. llama-swap (or a key-checking proxy in
+# front of it, e.g. llama-guard) must be reachable here.
 llama_swap_url = "http://127.0.0.1:8080"
+
+# API key kv-proxy presents to the upstream on every request (slots, /running,
+# /v1/models, chat forwards). Required when the upstream enforces apiKeys.
+# Two ways to set it (explicit key wins):
+#
+# llama_swap_api_key = "ls-..."
+#
+# or point at llama-swap's own config.yaml so the key lives in ONE place
+# (the first entry of its `apiKeys` list is used):
+# llama_swap_config = "~/llama.cpp/config.yaml"
+#
+# Without either, requests go out unauthenticated.
 
 # Where per-session KV blobs live: <cache_dir>/<frontend>/<session>/<model>/state.bin
 cache_dir = "~/.kv-cache"

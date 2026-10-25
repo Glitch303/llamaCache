@@ -180,12 +180,14 @@ def _keys(request: Request) -> dict[str, str]:
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
-    """Forward the client's auth so llama-swap can validate its own keys too."""
-    out = {}
-    auth = request.headers.get("authorization")
-    if auth:
-        out["Authorization"] = auth
-    return out
+    """Headers to forward upstream (beyond what LlamaClient adds itself).
+
+    The client's Authorization header is NOT forwarded: it is a kv-proxy
+    attribution key (the [keys] section) used for frontend/session identity,
+    while upstream auth (llama-swap / llama-guard) is kv-proxy's job via
+    ``llama_swap_api_key`` / ``llama_swap_config``.
+    """
+    return {}
 
 
 def _sse_start(status_code: int, rheaders: dict[str, str]) -> bytes:

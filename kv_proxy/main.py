@@ -7,7 +7,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from .config import Config, load_config
+from .config import Config, load_config, resolve_upstream_api_key
 from .endpoints import Proxy, create_app
 from .llama_client import LlamaClient
 from .cache_store import CacheStore
@@ -23,8 +23,9 @@ def build_app(config: Config | None = None):
     @asynccontextmanager
     async def lifespan(app):
         log.info(
-            "kv-proxy starting: upstream=%s cache_dir=%s max_cache=%dMB",
+            "kv-proxy starting: upstream=%s cache_dir=%s max_cache=%dMB upstream_key=%s",
             cfg.llama_swap_url, cfg.cache_dir, cfg.max_cache_size // (1024 * 1024),
+            "set" if client.api_key else "not set (unauthenticated upstream)",
         )
         proxy.slots.ensure_watcher()
         try:
@@ -36,6 +37,7 @@ def build_app(config: Config | None = None):
     client = LlamaClient(
         cfg.llama_swap_url, cfg.direct_upstream,
         direct_llama_server=cfg.direct_llama_server,
+        api_key=resolve_upstream_api_key(cfg),
     )
     store = CacheStore(cfg.cache_dir, cfg.max_cache_size)
     slots = SlotManager(

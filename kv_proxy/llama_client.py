@@ -26,21 +26,36 @@ class LlamaError(Exception):
 
 class LlamaClient:
     def __init__(self, swap_url: str, direct_upstream: dict[str, str] | None = None,
-                 timeout: float = 30.0, direct_llama_server: bool = False):
+                 timeout: float = 30.0, direct_llama_server: bool = False,
+                 api_key: str | None = None):
         self.swap_url = swap_url.rstrip("/")
         self.direct_upstream = {k: v.rstrip("/") for k, v in (direct_upstream or {}).items()}
         # direct_llama_server: upstream is a plain llama-server, not llama-swap.
         # Slot ops then hit /slots directly; chat requests still use the body's
         # model field (llama-server accepts and ignores it).
         self.direct_llama_server = direct_llama_server
+        # API key presented to the upstream (llama-swap / llama-guard). The
+        # client's own Bearer key is a kv-proxy attribution key and must not
+        # be forwarded as upstream auth.
+        self.api_key = (api_key or "").strip() or None
         self._client = httpx.AsyncClient(
             base_url=self.swap_url,
             timeout=httpx.Timeout(timeout, read=3600.0),  # long reads: generations
             follow_redirects=True,
         )
 
+    def _auth(self) -> dict[str, str]:
+        """Auth headers for upstream requests; {} when no key is configured."""
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def __aenter__(self) -> "LlamaClient":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.aclose()
 
     # ------------------------------------------------------------- slot ops
 
@@ -56,7 +71,7 @@ class LlamaClient:
         return f"/upstream/{model}/slots{('/' + sub) if sub else ''}"
 
     async def get_slots(self, model: str) -> list[dict]:
-        r = await self._client.get(self._slot_path(model))
+        r = await self._client.get(self._slot_path(model), headers=self._auth())
         if r.status_code != 200:
             raise LlamaError(r.status_code, r.text[:300])
         return r.json()
@@ -66,6 +81,7 @@ class LlamaClient:
             self._slot_path(model, f"{slot_id}"),
             params={"action": "save"},
             json={"filename": filename},
+            headers=self._auth(),
         )
         if r.status_code != 200:
             raise LlamaError(r.status_code, r.text[:300])
@@ -76,6 +92,7 @@ class LlamaClient:
             self._slot_path(model, f"{slot_id}"),
             params={"action": "restore"},
             json={"filename": filename},
+            headers=self._auth(),
         )
         if r.status_code != 200:
             raise LlamaError(r.status_code, r.text[:300])
@@ -85,6 +102,7 @@ class LlamaClient:
         r = await self._client.post(
             self._slot_path(model, f"{slot_id}"),
             params={"action": "erase"},
+            headers=self._auth(),
         )
         if r.status_code != 200:
             raise LlamaError(r.status_code, r.text[:300])
@@ -106,7 +124,7 @@ class LlamaClient:
             except (httpx.HTTPError, ValueError):
                 return []
         try:
-            r = await self._client.get("/running")
+            r = await self._client.get("/running", headers=self._auth())
             if r.status_code != 200:
                 return []
             data = r.json()
@@ -123,28 +141,43 @@ class LlamaClient:
                         out.append(str(mid))
             return out
         if isinstance(data, dict):
+            # llama-swap: {"running": [{"model": "...", ...}, ...]}
+            if "running" in data and isinstance(data["running"], list):
+                return self._model_ids_from(data["running"])
             # tolerate {"models": [...]} or {model_id: {...}} shapes
             if "models" in data and isinstance(data["models"], list):
                 return [str(m) for m in data["models"]]
             return list(data.keys())
         return []
 
+    @staticmethod
+    def _model_ids_from(items: list) -> list[str]:
+        out = []
+        for item in items:
+            if isinstance(item, str):
+                out.append(item)
+            elif isinstance(item, dict):
+                mid = item.get("model") or item.get("id") or item.get("name")
+                if mid:
+                    out.append(str(mid))
+        return out
+
     async def health(self, model: str | None = None) -> bool:
         """True when llama-swap (and the model's server, if given) is ready."""
         try:
-            r = await self._client.get("/health")
+            r = await self._client.get("/health", headers=self._auth())
             if r.status_code != 200:
                 return False
             if model:
                 # /upstream passthrough to the model's own health endpoint
-                r2 = await self._client.get(f"/upstream/{model}/health")
+                r2 = await self._client.get(f"/upstream/{model}/health", headers=self._auth())
                 return r2.status_code == 200
             return True
         except httpx.HTTPError:
             return False
 
     async def get_models(self) -> Any:
-        r = await self._client.get("/v1/models")
+        r = await self._client.get("/v1/models", headers=self._auth())
         return r.json() if r.status_code == 200 else {"data": []}
 
     # ---------------------------------------------------------- forwarding
@@ -156,6 +189,7 @@ class LlamaClient:
         h = {"Content-Type": "application/json"}
         if headers:
             h.update(headers)
+        h.update(self._auth())  # upstream key always wins over forwarded headers
         r = await self._client.post(path, json=body, headers=h)
         try:
             data = r.json()
@@ -175,6 +209,7 @@ class LlamaClient:
         h = {"Content-Type": "application/json", "Accept": "text/event-stream"}
         if headers:
             h.update(headers)
+        h.update(self._auth())  # upstream key always wins over forwarded headers
         req = self._client.build_request("POST", path, json=body, headers=h)
         resp = await self._client.send(req, stream=True)
         try:

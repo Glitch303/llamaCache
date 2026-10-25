@@ -48,6 +48,13 @@ class Config:
     direct_llama_server: bool = False
     direct_upstream: dict[str, str] = field(default_factory=dict)
     keys: dict[str, str] = field(default_factory=dict)
+    # API key presented to the upstream (llama-swap / llama-guard). The client's
+    # own Bearer key (the [keys] section) is only used for frontend attribution
+    # and is NOT what upstream validates — upstream wants this key.
+    llama_swap_api_key: str | None = None
+    # Path to llama-swap's own config.yaml. If llama_swap_api_key is not set,
+    # the first entry of its `apiKeys` list is used (single source of truth).
+    llama_swap_config: Path | None = None
 
     @property
     def host(self) -> str:
@@ -134,8 +141,53 @@ def load_config(path: str | Path | None = None) -> Config:
     if isinstance(keys, dict):
         cfg.keys = {str(k): str(val) for k, val in keys.items() if str(val)}
 
+    if v := data.get("llama_swap_api_key") or _env("KV_PROXY_LLAMA_SWAP_API_KEY"):
+        cfg.llama_swap_api_key = str(v)
+    if v := data.get("llama_swap_config") or _env("KV_PROXY_LLAMA_SWAP_CONFIG"):
+        cfg.llama_swap_config = Path(str(v)).expanduser()
+
     cfg.validate()
     return cfg
+
+
+def resolve_upstream_api_key(cfg: Config) -> str | None:
+    """The API key kv-proxy presents to the upstream (llama-swap / llama-guard).
+
+    Precedence:
+      1. explicit ``llama_swap_api_key`` (config or KV_PROXY_LLAMA_SWAP_API_KEY)
+      2. first entry of ``apiKeys`` in ``llama_swap_config`` (llama-swap's own
+         config.yaml — single source of truth; keep the key in one place)
+
+    Returns None when no key is configured (upstream then accepts unauthenticated
+    requests, e.g. llama-swap without ``apiKeys``).
+    """
+    if cfg.llama_swap_api_key:
+        return cfg.llama_swap_api_key
+    if cfg.llama_swap_config is not None:
+        if not cfg.llama_swap_config.is_file():
+            import logging
+            logging.getLogger("kv_proxy.config").warning(
+                "llama_swap_config %s not found — upstream requests go out "
+                "without an API key", cfg.llama_swap_config,
+            )
+            return None
+        try:
+            import yaml
+            with open(cfg.llama_swap_config, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            keys = (data or {}).get("apiKeys") if isinstance(data, dict) else None
+            if isinstance(keys, list):
+                for k in keys:
+                    if k is not None and str(k) != "":
+                        return str(k)
+        except Exception as e:  # noqa: BLE001 - config file is user-managed
+            import logging
+            logging.getLogger("kv_proxy.config").warning(
+                "could not read apiKeys from %s: %s — upstream requests go out "
+                "without an API key", cfg.llama_swap_config, e,
+            )
+        return None
+    return None
 
 
 def _validate_path(p: Path) -> Path:
